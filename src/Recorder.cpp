@@ -5,7 +5,7 @@
 #include <sstream>
 #include <string>
 
-#include "vcvrecorder.hpp"
+#include "mrVanDalo.hpp"
 #include "samplerate.h"
 #include "../ext/osdialog/osdialog.h"
 #include "write_wav.h"

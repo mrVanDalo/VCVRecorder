@@ -7,7 +7,7 @@ def reformat (file)
 end
 
 
-files = %w( src/Recorder.cpp src/vcvrecorder.cpp src/vcvrecorder.hpp )
+files = %w( src/Recorder.cpp src/mrVanDalo.cpp src/mrVanDalo.hpp )
 
 task :reformat do
   files.each do |file|

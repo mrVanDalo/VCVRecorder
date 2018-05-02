@@ -1,4 +1,5 @@
 
+require 'fileutils'
 
 def reformat (file)
   puts "reformat #{file}"
@@ -8,9 +9,17 @@ end
 
 files = %w( src/Recorder.cpp src/vcvrecorder.cpp src/vcvrecorder.hpp )
 
-task :default do
+task :reformat do
   files.each do |file|
     reformat file
   end
 end
 
+
+
+task "test"  do
+  sh "./runtest.sh"
+end
+
+
+task :default => [ :reformat ]

@@ -101,7 +101,12 @@ void Recorder<ChannelCount>::openWAV() {
 	#endif
 	if (!filename.empty()) {
 		fprintf(stdout, "Recording to %s\n", filename.c_str());
-		int result = Audio_WAV_OpenWriter(&writer, filename.c_str(), gSampleRate, ChannelCount);
+		int result = Audio_WAV_OpenWriter(
+			&writer,
+			filename.c_str(),
+			gSampleRate,
+			ChannelCount
+			);
 		if (result < 0) {
 			isRecording = false;
 			char msg[100];
@@ -136,7 +141,11 @@ void Recorder<ChannelCount>::recorderRun() {
 		float sleepTime = (1.0 * BUFFERSIZE / gSampleRate) / 2.0;
 		std::this_thread::sleep_for(std::chrono::duration<float>(sleepTime));
 		if (buffer.full()) {
-			fprintf(stderr, "Recording buffer overflow. Can't write quickly enough to disk. Current buffer size: %d\n", BUFFERSIZE);
+			fprintf(
+				stderr,
+				"Recording buffer overflow. Can't write quickly enough to disk. Current buffer size: %d\n",
+				BUFFERSIZE
+				);
 		}
 		// Check if there is data
 		int numFrames = buffer.size();
@@ -144,7 +153,11 @@ void Recorder<ChannelCount>::recorderRun() {
 			// Convert float frames to shorts
 			{
 				std::lock_guard<std::mutex> lock(mutex); // Lock during conversion
-				src_float_to_short_array(static_cast<float*>(buffer.data[0].samples), writeBuffer, ChannelCount*numFrames);
+				src_float_to_short_array(
+					static_cast<float*>(buffer.data[0].samples),
+					writeBuffer,
+					ChannelCount*numFrames
+					);
 				buffer.start = 0;
 				buffer.end = 0;
 			}
@@ -224,8 +237,14 @@ RecorderWidget<ChannelCount>::RecorderWidget() {
 
 		xPos = 35;
 		yPos += 2*margin;
-		ParamWidget *recordButton =
-			createParam<RecordButton>(Vec(xPos, yPos-1), module, Recorder<ChannelCount>::RECORD_PARAM, 0.0, 1.0, 0.0);
+		ParamWidget *recordButton = createParam<RecordButton>(
+			Vec(xPos, yPos-1),
+			module,
+			Recorder<ChannelCount>::RECORD_PARAM,
+			0.0,
+			1.0,
+			0.0
+			);
 		RecordButton *btn = dynamic_cast<RecordButton*>(recordButton);
 		Recorder<ChannelCount> *recorder = dynamic_cast<Recorder<ChannelCount>*>(module);
 
@@ -238,7 +257,11 @@ RecorderWidget<ChannelCount>::RecorderWidget() {
 					       }
 				       };
 		addParam(recordButton);
-		addChild(createLight<SmallLight<RedLight> >(Vec(xPos+6, yPos+5), module, Recorder<ChannelCount>::RECORDING_LIGHT));
+		addChild(createLight<SmallLight<RedLight> >(
+				 Vec(xPos+6, yPos+5),
+				 module,
+				 Recorder<ChannelCount>::RECORDING_LIGHT
+				 ));
 		xPos = margin;
 		yPos += recordButton->box.size.y + 3*margin;
 	}

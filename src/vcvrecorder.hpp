@@ -28,10 +28,21 @@ struct RecorderWidget : ModuleWidget {
 	void fromJsonData(json_t *root);
 };
 
+struct Recorder1Widget : RecorderWidget<1u>
+{
+	Recorder1Widget();
+};
+
 struct Recorder2Widget : RecorderWidget<2u>
 {
 	Recorder2Widget();
 };
+
+struct Recorder4Widget : RecorderWidget<4u>
+{
+	Recorder4Widget();
+};
+
 
 struct Recorder8Widget : RecorderWidget<8u>
 {

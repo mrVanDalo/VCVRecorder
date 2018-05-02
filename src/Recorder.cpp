@@ -2,6 +2,9 @@
 #include <functional>
 #include <thread>
 
+#include <sstream>
+#include <string>
+
 #include "vcvrecorder.hpp"
 #include "samplerate.h"
 #include "../ext/osdialog/osdialog.h"
@@ -20,6 +23,7 @@ struct Recorder : Module {
 		NUM_PARAMS
 	};
 	enum InputIds {
+		TRIGGER_INPUT,
 		AUDIO1_INPUT,
 		NUM_INPUTS = AUDIO1_INPUT + ChannelCount
 	};
@@ -32,8 +36,14 @@ struct Recorder : Module {
 	};
 
 	std::string filename;
+
+	unsigned int counter = 0;
+
 	WAV_Writer writer;
 	std::atomic_bool isRecording;
+	std::atomic_bool isSharp;
+	SchmittTrigger resetTrigger;
+
 
 	std::mutex mutex;
 	std::thread thread;
@@ -43,6 +53,7 @@ struct Recorder : Module {
 	Recorder() : Module(NUM_PARAMS, NUM_INPUTS, NUM_OUTPUTS, NUM_LIGHTS)
 	{
 		isRecording = false;
+		isSharp = false;
 	}
 	~Recorder();
 	void step();
@@ -63,11 +74,12 @@ Recorder<ChannelCount>::~Recorder() {
 template <unsigned int ChannelCount>
 void Recorder<ChannelCount>::clear() {
 	filename = "";
+	counter = 0;
+	isSharp = false;
 }
 
 template <unsigned int ChannelCount>
 void Recorder<ChannelCount>::startRecording() {
-	saveAsDialog();
 	if (!filename.empty()) {
 		openWAV();
 		isRecording = true;
@@ -85,13 +97,15 @@ void Recorder<ChannelCount>::stopRecording() {
 template <unsigned int ChannelCount>
 void Recorder<ChannelCount>::saveAsDialog() {
 	std::string dir = filename.empty() ? "." : extractDirectory(filename);
-	char *path = osdialog_file(OSDIALOG_SAVE, dir.c_str(), "Output.wav", NULL);
+	char *path = osdialog_file(OSDIALOG_SAVE, dir.c_str(), "Output", NULL);
 	if (path) {
 		filename = path;
 		free(path);
 	} else {
 		filename = "";
 	}
+	isSharp = true;
+	counter = 0;
 }
 
 template <unsigned int ChannelCount>
@@ -100,10 +114,17 @@ void Recorder<ChannelCount>::openWAV() {
 	float gSampleRate = engineGetSampleRate();
 	#endif
 	if (!filename.empty()) {
-		fprintf(stdout, "Recording to %s\n", filename.c_str());
+
+		char counterBuffer[10];
+		sprintf( counterBuffer, "%04d", counter );
+		std::stringstream ss;
+		ss << filename << counterBuffer << ".wav";
+		std::string outFilename = ss.str();
+
+		fprintf(stdout, "Recording to %s\n", outFilename.c_str());
 		int result = Audio_WAV_OpenWriter(
 			&writer,
-			filename.c_str(),
+			outFilename.c_str(),
 			gSampleRate,
 			ChannelCount
 			);
@@ -128,6 +149,7 @@ void Recorder<ChannelCount>::closeWAV() {
 		fprintf(stderr, "%s", msg);
 	}
 	isRecording = false;
+	counter++;
 }
 
 // Run in a separate thread
@@ -176,10 +198,24 @@ void Recorder<ChannelCount>::recorderRun() {
 	}
 }
 
-/* needed ? */
+/* call where data is processed */
 template <unsigned int ChannelCount>
 void Recorder<ChannelCount>::step() {
+
 	lights[RECORDING_LIGHT].value = isRecording ? 1.0 : 0.0;
+
+	if(isSharp && !isRecording) {
+		if( resetTrigger.process(inputs[TRIGGER_INPUT].value) ) {
+			startRecording();
+		}
+	}
+
+	if(isSharp && isRecording) {
+		if( resetTrigger.process(inputs[TRIGGER_INPUT].value) ) {
+			stopRecording();
+		}
+	}
+
 	if (isRecording) {
 		// Read input samples into recording buffer
 		std::lock_guard<std::mutex> lock(mutex);
@@ -210,12 +246,35 @@ struct RecordButton : LEDButton {
 	}
 };
 
+struct CounterLabel : Label {
+	unsigned int * counter;
+
+	void draw(NVGcontext *vg) override {
+		char counterBuffer[10];
+		sprintf( counterBuffer, "%04d", *counter );
+		bndLabel(vg, 0.0, 0.0, box.size.x, box.size.y, -1, counterBuffer );
+	}
+
+};
+
 
 template <unsigned int ChannelCount>
 RecorderWidget<ChannelCount>::RecorderWidget() {
 	Recorder<ChannelCount> *module = new Recorder<ChannelCount>();
 	setModule(module);
-	box.size = Vec(15*6+5, 380);
+
+	float margin = 11;
+	float docMargin = 24; // distance for input/ouput documentation
+	float labelHeight = 15;
+	float yPos = margin;
+	float xPos = margin;
+
+	unsigned int holes = 7;
+	unsigned int holeDistance = 15;
+
+	unsigned int xHalf = holes * (holeDistance / 2) - (holeDistance / 2 );
+
+	box.size = Vec(holeDistance * holes, 380);
 
 	{
 		Panel *panel = new LightPanel();
@@ -223,22 +282,22 @@ RecorderWidget<ChannelCount>::RecorderWidget() {
 		addChild(panel);
 	}
 
-	float margin = 5;
-	float labelHeight = 15;
-	float yPos = margin;
-	float xPos = margin;
 
 	{
+		xPos = xHalf - 22;
 		Label *label = new Label();
 		label->box.pos = Vec(xPos, yPos);
-		label->text = "Recorder " + std::to_string(ChannelCount);
+		label->text = "VCV-Rec";
 		addChild(label);
-		yPos += labelHeight + margin;
+		yPos += labelHeight;
+	}
 
-		xPos = 35;
-		yPos += 2*margin;
+	// record part
+	{
+		xPos = xHalf + 2;
+		yPos += margin;
 		ParamWidget *recordButton = createParam<RecordButton>(
-			Vec(xPos, yPos-1),
+			Vec(xPos, yPos),
 			module,
 			Recorder<ChannelCount>::RECORD_PARAM,
 			0.0,
@@ -251,9 +310,7 @@ RecorderWidget<ChannelCount>::RecorderWidget() {
 		btn->onPressCallback = [=]()
 				       {
 					       if (!recorder->isRecording) {
-						       recorder->startRecording();
-					       } else {
-						       recorder->stopRecording();
+						       recorder->saveAsDialog();
 					       }
 				       };
 		addParam(recordButton);
@@ -262,38 +319,76 @@ RecorderWidget<ChannelCount>::RecorderWidget() {
 				 module,
 				 Recorder<ChannelCount>::RECORDING_LIGHT
 				 ));
-		xPos = margin;
-		yPos += recordButton->box.size.y + 3*margin;
+
+
+		// Counter
+		xPos = xHalf - 12;
+		yPos += docMargin - 2;
+		CounterLabel *label = new CounterLabel();
+		label->box.pos = Vec(xPos, yPos);
+		label->counter = &module->counter;
+		addChild(label);
+		yPos += labelHeight;
 	}
 
+
+	// trigger part
 	{
+		xPos = xHalf;
+		yPos += margin;
+		addInput(createInput<PJ301MPort>(Vec(xPos, yPos), module, Recorder<ChannelCount>::TRIGGER_INPUT));
+		yPos += docMargin;
+
+		xPos = xHalf - 16;
 		Label *label = new Label();
-		label->box.pos = Vec(margin, yPos);
+		label->box.pos = Vec(xPos, yPos);
+		label->text = "Trigger";
+		addChild(label);
+	}
+
+	// channels part
+	{
+		yPos += 3 * margin;
+		xPos = xHalf - 22;
+		Label *label = new Label();
+		label->box.pos = Vec(xPos, yPos);
 		label->text = "Channels";
 		addChild(label);
-		yPos += labelHeight + margin;
-	}
+		yPos += labelHeight;
 
-	yPos += 5;
-	xPos = 10;
-	for (unsigned int i = 0; i < ChannelCount; i++) {
-		addInput(createInput<PJ3410Port>(Vec(xPos, yPos), module, i));
-		Label *label = new Label();
-		label->box.pos = Vec(xPos + 4, yPos + 28);
-		label->text = stringf("%d", i + 1);
-		addChild(label);
+		yPos += margin;
+		xPos = margin;
+		for (unsigned int i = 0; i < ChannelCount; i++) {
 
-		if (i % 2 ==0) {
-			xPos += 37 + margin;
-		} else {
-			xPos = 10;
-			yPos += 40 + margin;
+			addInput(createInput<PJ3410Port>(Vec(xPos, yPos), module, Recorder<ChannelCount>::AUDIO1_INPUT + i));
+			Label *label = new Label();
+			label->box.pos = Vec(xPos + 4, yPos + 28);
+			label->text = stringf("%d", i + 1);
+			addChild(label);
+
+			if (i % 2 == 0) {
+				xPos += 37 + margin;
+			} else {
+				xPos = margin;
+				yPos += 40 + margin;
+			}
 		}
+
 	}
+}
+
+Recorder1Widget::Recorder1Widget() :
+	RecorderWidget<1u>()
+{
 }
 
 Recorder2Widget::Recorder2Widget() :
 	RecorderWidget<2u>()
+{
+}
+
+Recorder4Widget::Recorder4Widget() :
+	RecorderWidget<4u>()
 {
 }
 
